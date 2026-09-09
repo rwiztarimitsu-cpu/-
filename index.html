@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>業者見積→自社見積コンバータ</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{--ink:#1f2937;--sub:#6b7280;--line:#e5e7eb;--bg:#f7f8fa;--acc:#2563eb;--err:#dc2626;--ok:#047857;--warn:#b45309;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;font-size:14px;line-height:1.5}
+  .wrap{max-width:980px;margin:0 auto;padding:20px 16px 48px}
+  h1{font-size:20px;margin:0 0 4px}
+  .lead{color:var(--sub);margin:0 0 18px;font-size:13px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .hint{font-size:12px;color:var(--sub);margin-top:6px}
+  .drop{border:2px dashed #b9c2d0;border-radius:10px;padding:18px;text-align:center;background:#fafbfd;cursor:pointer;transition:.15s}
+  .drop.over{border-color:var(--acc);background:#eef4ff}
+  .drop .big{font-weight:700}
+  .drop .sm{font-size:12px;color:var(--sub);margin-top:4px}
+  .drop input{display:none}
+  .status{font-size:12px;margin-top:8px;color:var(--sub)}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)} .status.warn{color:var(--warn)}
+  textarea{width:100%;min-height:170px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;padding:10px;border:1px solid #cfd4dc;border-radius:6px;background:#fff;white-space:pre;overflow:auto;margin-top:10px}
+  textarea:focus{outline:2px solid #bfdbfe;border-color:var(--acc)}
+  textarea.prev{background:#fafafa;font-size:12px;min-height:130px;margin-top:0}
+  .ranks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  @media(max-width:640px){.ranks{grid-template-columns:1fr}}
+  .rank{border:2px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;background:#fff;display:block}
+  .rank input{margin-right:6px}
+  .rank.on{border-color:var(--acc);background:#eef4ff}
+  .rank .t{font-weight:700}
+  .rank .m{font-size:12px;color:var(--sub)}
+  .rank .tot{margin-top:6px;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  th{font-size:12px;color:var(--sub);font-weight:600;background:#fafafa}
+  .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tfoot td{font-weight:700;background:#fafafa}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+  @media(max-width:640px){.summary{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .stat .k{font-size:12px;color:var(--sub)}
+  .stat .v{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+  .stat.total{background:#eef4ff;border-color:#bfdbfe}
+  .btn{display:inline-block;padding:9px 16px;border-radius:7px;border:1px solid #cfd4dc;background:#fff;cursor:pointer;font-size:14px}
+  .btn.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  .btn.primary:disabled{opacity:.45;cursor:not-allowed}
+  .btn.small{padding:5px 10px;font-size:12px}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .msg{margin-top:10px;padding:10px 12px;border-radius:7px;font-size:13px;display:none}
+  .msg.err{display:block;background:#fef2f2;color:var(--err);border:1px solid #fecaca}
+  .msg.ok{display:block;background:#ecfdf5;color:var(--ok);border:1px solid #a7f3d0}
+  .meta{font-size:12px;color:var(--sub);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>業者見積→自社見積コンバータ</h1>
+  <p class="lead">協力業者の見積PDFをそのまま貼り付け（またはドロップ）、総額ランクを選ぶだけで、粗利を乗せた自社見積とMF取込CSV（Shift-JIS）を作ります。処理はすべてこのブラウザ内で完結し、どこにも送信しません。</p>
+
+  <div class="card">
+    <h2>資料：業者見積のPDF</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="application/pdf,.pdf" multiple>
+      <div class="big">ここにPDFをドロップ ／ Ctrl+V（⌘V）で貼り付け ／ クリックして選択</div>
+      <div class="sm">複数ファイル可。文字が入ったPDF（業者の見積ソフト出力など）を読み取ります。スキャン画像のPDF・写真は読めません。</div>
+    </label>
+    <div class="status" id="pdfStatus">PDF未読込。テキストを下の欄に直接貼り付けてもOKです。</div>
+    <textarea id="src" placeholder="PDFを読むとここに文字が入ります（手で直せます）。&#10;テキスト貼り付けの場合：1行目に件名（任意）、以降「品名 金額」の行。"></textarea>
+    <div class="hint">読み取り結果は「最初の数値の手前＝品名、最後の数値＝金額」として解釈します。小計・合計・消費税・◯%対象・値引の行は自動除外。件名は「工事名／件名／現場名」の行から取ります。</div>
+    <div class="toolbar">
+      <button class="btn small" id="fill" type="button">サンプルを入れる</button>
+      <button class="btn small" id="clear" type="button">クリア</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>入力：総額ランク（これだけ選びます）</h2>
+    <div class="ranks" id="ranks"></div>
+    <div class="hint">ランクは粗利率で総額を決めます。各行の売価＝原価÷(1−粗利率) を百の位で切り上げます。</div>
+  </div>
+
+  <div class="card">
+    <h2>結果：自社見積</h2>
+    <div class="meta" id="meta"></div>
+    <table>
+      <thead><tr><th style="width:36px">#</th><th>品名</th><th class="r" style="width:130px">原価</th><th class="r" style="width:130px">売価</th></tr></thead>
+      <tbody id="tbody"></tbody>
+      <tfoot><tr><td></td><td>合計</td><td class="r" id="fCost">0</td><td class="r" id="fSale">0</td></tr></tfoot>
+    </table>
+    <div class="summary">
+      <div class="stat"><div class="k">税抜合計（売価）</div><div class="v" id="sSub">0</div></div>
+      <div class="stat"><div class="k">消費税（10%）</div><div class="v" id="sTax">0</div></div>
+      <div class="stat"><div class="k">粗利額（率）</div><div class="v" id="sGp">0</div></div>
+      <div class="stat total"><div class="k">税込合計</div><div class="v" id="sTot">0</div></div>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="toolbar">
+      <button class="btn primary" id="dl" type="button" disabled>MF取込CSVをダウンロード（Shift-JIS）</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>CSVプレビュー（確認用・画面表示はUTF-8）</h2>
+    <textarea class="prev" id="csvPrev" readonly></textarea>
+    <div class="hint">ダウンロードされるファイルはShift-JISに変換されます。ファイル名：MF取込用_見積.csv／取引先：<span id="toriDisp"></span>／発行日：<span id="hakkoDisp"></span></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ====== 設定（ここを変えれば挙動が変わる） ======
+  var RANKS = [
+    {key:"low",  label:"ランク 低", margin:0.20, note:"粗利率20%"},
+    {key:"mid",  label:"ランク 中", margin:0.30, note:"粗利率30%（標準）"},
+    {key:"high", label:"ランク 高", margin:0.40, note:"粗利率40%"}
+  ];
+  var DEFAULT_RANK = "mid";
+  var ROUND_UNIT = 100;
+  var TAX_RATE = 0.10;
+  var TORI = "株式会社サンプル";  // ← 取引先名（実運用では自社の取引先に変更）
+  var DEFAULT_KEN = "見積";
+  var SKIP_RE  = /^(小計|合計|総合計|消費税|税込|税抜|値引|端数調整|工事金額|合計金額|御見積金額|見積金額|内訳)|(対象|税率|％|%)/;
+  var KEN_RE   = /^(工事名|件名|現場名)[\s:：]*(.+)$/;
+  var KEN_BLACK= /(年.*月|TEL|FAX|〒|御中|見積書|様$|株式会社|有限会社|見積り申し上げ|有効期限|担当者|納入|受渡|取引方法)/;
+  var PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  var HEADER = ["csv_type(変更不可)","行形式","取引先名称","件名","発行日","見積書番号","メモ","タグ","小計","消費税","合計金額","取引先敬称","取引先郵便番号","取引先都道府県","取引先住所1","取引先住所2","取引先部署","取引先担当者役職","取引先担当者氏名","自社担当者氏名","備考","受注ステータス","メール送信ステータス","郵送ステータス","ダウンロードステータス","品名","品目コード","単価","数量","単位","詳細","金額","品目消費税率"];
+  var CSV_TYPE = "30301";
+  var SAMPLE = "サンプル邸　改修工事（追加工事）\n給水配管工事 100,000\n建物内配管工事 400,000\n断熱材追加工事 150,000\nユニットバス床作成工事 90,000";
+
+  var $ = function(id){ return document.getElementById(id); };
+  function fmt(n){ return (n<0?"-":"")+Math.abs(n).toLocaleString("ja-JP"); }
+  function today(){ var d=new Date(); return d.getFullYear()+"/"+("0"+(d.getMonth()+1)).slice(-2)+"/"+("0"+d.getDate()).slice(-2); }
+  function sale(cost, margin){ return Math.ceil(cost/(1-margin)/ROUND_UNIT)*ROUND_UNIT; }
+
+  // ====== 行解析（表の行：品名 単価 数量 単位 金額 → 品名＝最初の数値の手前、金額＝最後の数値） ======
+  function fw2hw(s){ return s.replace(/[０-９]/g,function(c){return String.fromCharCode(c.charCodeAt(0)-0xFEE0);}).replace(/，/g,",").replace(/．/g,".").replace(/　/g," "); }
+  function isNum(t){ return /\d/.test(t) && /^[¥￥]?-?[\d,]+(\.\d+)?円?$/.test(t); }
+  function toNum(t){ return parseFloat(t.replace(/[¥￥円,]/g,"")); }
+  function normName(s){ return s.replace(/[\s()（）【】\[\]「」]/g,""); }
+  var UNIT_RE  = /^(式|人工|人|m|m2|㎡|m3|㎥|箇所|ヶ所|ケ所|枚|本|個|台|袋|灯|組|セット|缶|kg|L|回|日|月|h|時間|坪|畳|面|ｍ|ｍ2)$/i;
+  var LABEL_RE = /^(金|円也|金円也|単位|金額|数量|単価|品目|価格|仕様|内容|工事種別|備考|小計|計)$/;
+  var HEADER_RE= /(数量|単位|単価|金額|品目|価格|工事種別|仕様・内容)/;
+  var PAGE_RE  = /^\d+\s*\/\s*\d+$/;
+  var MIN_ATTACH = 100;
+  function isNameCandidate(line){
+    if(!line) return false;
+    if(/^[※＊*■●・【（(]/.test(line)) return false;
+    var n=normName(line);
+    if(KEN_RE.test(line) || KEN_BLACK.test(line) || KEN_BLACK.test(n)) return false;
+    if(!n || SKIP_RE.test(n) || LABEL_RE.test(n) || HEADER_RE.test(n)) return false;
+    return true;
+  }
+  function parse(text){
+    var lines=text.split(/\r?\n/);
+    var ken=null, kenFallback=null, items=[], skipped=[], pending=null;
+    for(var i=0;i<lines.length;i++){ var L=fw2hw(lines[i]).trim(); var km=L.match(KEN_RE); if(km&&km[2].trim()){ ken=km[2].trim().replace(/\s*(TEL|FAX|Tel|Fax|〒|担当|電話|E-?mail).*$/,"").trim(); break; } }
+    lines.forEach(function(raw){
+      var line=fw2hw(raw).trim(); if(!line) return;
+      if(KEN_RE.test(line)) return;
+      if(PAGE_RE.test(line)){ skipped.push(line); return; }
+      var toks=line.split(/\s+/), first=-1, last=-1, nnum=0, hasUnit=false;
+      for(var i=0;i<toks.length;i++){ if(isNum(toks[i])){ if(first<0) first=i; last=i; nnum++; } else if(UNIT_RE.test(toks[i])) hasUnit=true; }
+      if(first>0){
+        var name=toks.slice(0,first).join(" ");
+        if(/^[※＊*]/.test(name) && pending) name=pending; // 注記行に数値が結合した場合は直前の品名
+        var amt=Math.round(toNum(toks[last]));
+        pending=null;
+        var nn=normName(name);
+        if(/^【/.test(name) || SKIP_RE.test(nn) || LABEL_RE.test(nn) || !(amt>0)){ skipped.push(line); return; }
+        items.push({name:name, cost:amt});
+      } else if(first===0){
+        var amt2=Math.round(toNum(toks[last]));
+        if(pending && (nnum>=2||hasUnit) && amt2>=MIN_ATTACH){ items.push({name:pending, cost:amt2}); }
+        else skipped.push(line);
+        pending=null;
+      } else {
+        if(isNameCandidate(line)) pending=line;
+        if(kenFallback===null && !KEN_BLACK.test(line) && !KEN_BLACK.test(normName(line)) && !/^[※＊*■●・【]/.test(line)) kenFallback=raw.trim();
+      }
+    });
+    return {items:items, ken:ken||kenFallback||DEFAULT_KEN, skipped:skipped};
+  }
+
+  // ====== PDF読み取り（pdf.js／ブラウザ内） ======
+  function setStatus(t,cls){ var s=$("pdfStatus"); s.textContent=t; s.className="status"+(cls?" "+cls:""); }
+  async function pdfToText(buf){
+    if(typeof pdfjsLib==="undefined") throw new Error("PDF読取ライブラリ（pdf.js）が読み込めていません。ネット接続を確認してください。");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+    var pdf = await pdfjsLib.getDocument({data:buf}).promise;
+    var out=[], chars=0, TOL=4, GAP=15; // TOL:同一行とみなす基準線差／GAP:同じセル塊とみなす行間
+    var NOTE=/^[※＊*■●]/;
+    for(var p=1;p<=pdf.numPages;p++){
+      var page=await pdf.getPage(p); var tc=await page.getTextContent();
+      var arr=[];
+      tc.items.forEach(function(it){ var s=(it.str||""); if(!s.trim()) return; arr.push({x:it.transform[4], y:it.transform[5], s:s.trim()}); chars+=s.length; });
+      arr.sort(function(a,b){ return (b.y-a.y)||(a.x-b.x); });
+      // 1) 基準線でクラスタ → 行
+      var rows=[], cur=null;
+      arr.forEach(function(it){ if(cur && Math.abs(cur.y-it.y)<=TOL){ cur.items.push(it); } else { cur={y:it.y, items:[it]}; rows.push(cur); } });
+      rows.forEach(function(r){
+        r.items.sort(function(a,b){return a.x-b.x;});
+        var k=-1; for(var i=0;i<r.items.length;i++){ if(isNum(fw2hw(r.items[i].s))){ k=i; break; } }
+        r.left = (k<0? r.items : r.items.slice(0,k)).map(function(o){return o.s;}).join(" ");
+        r.num  = (k<0? "" : r.items.slice(k).map(function(o){return o.s;}).join(" "));
+        r.text = r.items.map(function(o){return o.s;}).join(" ");
+      });
+      // 2) 行間GAP以内で連なる行＝同じセル塊
+      var blocks=[], b=null;
+      rows.forEach(function(r,i){ if(b && (rows[i-1].y - r.y)<=GAP){ b.push(r); } else { b=[r]; blocks.push(b); } });
+      // 3) 塊に数値行が1つだけなら、塊の先頭（注記除く）の左列テキストを品名として数値と結合
+      blocks.forEach(function(bl){
+        var numRows=bl.filter(function(r){return r.num;});
+        var isTableNum=function(ns){ var t=ns.split(/\s+/), n=0, u=false; t.forEach(function(x){ var h=fw2hw(x); if(isNum(h)) n++; else if(UNIT_RE.test(h)) u=true; }); return n>=2||u; };
+        if(numRows.length===1 && isTableNum(numRows[0].num)){
+          var nr=numRows[0];
+          var nameRow=null; for(var i=0;i<bl.length;i++){ if(bl[i].left && !NOTE.test(bl[i].left)){ nameRow=bl[i]; break; } }
+          if(!nameRow) nameRow=nr;
+          out.push((nameRow.left||"") + " " + nr.num);
+          bl.forEach(function(r){ if(r!==nameRow && r.left) out.push(r.left); });
+        } else {
+          bl.forEach(function(r){ out.push(r.text); });
+        }
+      });
+      out.push("");
+    }
+    return {text:out.join("\n"), pages:pdf.numPages, chars:chars};
+  }
+  async function loadPdfFiles(files){
+    var list=Array.prototype.filter.call(files,function(f){ return /pdf$/i.test(f.name)||f.type==="application/pdf"; });
+    if(!list.length){ setStatus("PDFファイルではありません。","err"); return; }
+    setStatus("PDFを読み取り中…");
+    var texts=[], pages=0, chars=0;
+    try{
+      for(var i=0;i<list.length;i++){
+        var r=await pdfToText(await list[i].arrayBuffer());
+        texts.push(r.text); pages+=r.pages; chars+=r.chars;
+      }
+    }catch(e){ setStatus("読み取り失敗："+(e.message||e),"err"); return; }
+    $("src").value=texts.join("\n");
+    update();
+    var n=parse($("src").value).items.length;
+    if(chars===0) setStatus("文字が見つかりません（スキャン画像のPDFの可能性）。テキストを直接貼り付けてください。","err");
+    else if(n===0) setStatus("PDFは読めましたが「品名 金額」の行を認識できませんでした（"+pages+"ページ）。下の欄を手で整えてください。","warn");
+    else setStatus("PDF読取OK："+list.length+"ファイル・"+pages+"ページ → 明細 "+n+"行を認識。下の欄で修正できます。","ok");
+  }
+  // テスト・外部連携用フック（ArrayBufferを渡す）
+  window.mfLoadPdfBuffer = async function(buf,name){ var f=new File([buf], name||"input.pdf", {type:"application/pdf"}); await loadPdfFiles([f]); };
+
+  // ====== CSV ======
+  function esc(v){ v=(v==null)?"":String(v); return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function row(){ var a=[]; for(var i=0;i<HEADER.length;i++) a.push(""); return a; }
+  function buildCSV(ken, items, margin){
+    var lines=[HEADER.join(",")];
+    var h=row(); h[0]=CSV_TYPE; h[1]="見積書"; h[2]=TORI; h[3]=ken; h[4]=today(); h[11]="御中";
+    lines.push(h.map(esc).join(","));
+    items.forEach(function(it){
+      var s=sale(it.cost,margin);
+      var r=row(); r[0]=CSV_TYPE; r[1]="品目"; r[25]=it.name; r[27]=s; r[28]=1; r[29]="式"; r[31]=s; r[32]="10%";
+      lines.push(r.map(esc).join(","));
+    });
+    return lines.join("\r\n")+"\r\n";
+  }
+
+  // ====== ランクUI ======
+  var current = DEFAULT_RANK;
+  function renderRanks(items){
+    var box=$("ranks"); box.innerHTML="";
+    RANKS.forEach(function(rk){
+      var sub=items.reduce(function(a,it){return a+sale(it.cost,rk.margin);},0), tax=Math.round(sub*TAX_RATE);
+      var el=document.createElement("label"); el.className="rank"+(rk.key===current?" on":"");
+      el.innerHTML='<div><input type="radio" name="rank" value="'+rk.key+'"'+(rk.key===current?" checked":"")+'><span class="t">'+rk.label+'</span></div><div class="m">'+rk.note+'</div><div class="tot">税込 '+(items.length?fmt(sub+tax):"—")+'</div>';
+      el.querySelector("input").addEventListener("change",function(){ current=rk.key; update(); });
+      box.appendChild(el);
+    });
+  }
+  function rankOf(key){ for(var i=0;i<RANKS.length;i++) if(RANKS[i].key===key) return RANKS[i]; return RANKS[0]; }
+
+  // ====== 更新 ======
+  var lastCSV="";
+  function update(){
+    var p=parse($("src").value), rk=rankOf(current);
+    renderRanks(p.items);
+    $("toriDisp").textContent=TORI; $("hakkoDisp").textContent=today();
+    var tb=$("tbody"); tb.innerHTML=""; var cost=0, sub=0;
+    p.items.forEach(function(it,i){
+      var s=sale(it.cost,rk.margin); cost+=it.cost; sub+=s;
+      var tr=document.createElement("tr");
+      var td=function(t,cls){ var d=document.createElement("td"); if(cls) d.className=cls; d.textContent=t; return d; };
+      tr.appendChild(td(i+1)); tr.appendChild(td(it.name)); tr.appendChild(td(fmt(it.cost),"r")); tr.appendChild(td(fmt(s),"r"));
+      tb.appendChild(tr);
+    });
+    var tax=Math.round(sub*TAX_RATE), tot=sub+tax, gp=sub-cost;
+    $("fCost").textContent=fmt(cost); $("fSale").textContent=fmt(sub);
+    $("sSub").textContent=fmt(sub); $("sTax").textContent=fmt(tax); $("sTot").textContent=fmt(tot);
+    $("sGp").textContent= sub? fmt(gp)+"（"+(gp/sub*100).toFixed(1)+"%）":"0";
+    $("meta").textContent="件名："+p.ken+"　／　"+rk.label+"（"+rk.note+"）"+(p.skipped.length?"　／　除外行："+p.skipped.length+"行":"");
+    var msg=$("msg"); msg.className="msg";
+    if(!p.items.length){ msg.classList.add("err"); msg.textContent="「品名 金額」の行が見つかりません。業者見積のPDFを貼り付けるか、明細をテキストで貼り付けてください。"; $("dl").disabled=true; lastCSV=""; $("csvPrev").value=""; return; }
+    lastCSV=buildCSV(p.ken,p.items,rk.margin); $("csvPrev").value=lastCSV; $("dl").disabled=false;
+    msg.classList.add("ok"); msg.textContent="変換OK。"+p.items.length+"行を売価化しました。ダウンロードできます。";
+  }
+
+  // ====== ダウンロード（Shift-JIS） ======
+  function download(){
+    if(!lastCSV) return;
+    if(typeof Encoding==="undefined"){ alert("文字コード変換ライブラリ（encoding.js）が読み込めていません。ネット接続を確認してください。"); return; }
+    var sjis=Encoding.convert(Encoding.stringToCode(lastCSV),{to:"SJIS",from:"UNICODE"});
+    var blob=new Blob([new Uint8Array(sjis)],{type:"text/csv"});
+    var a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="MF取込用_見積.csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+  }
+
+  // ====== 入力イベント（ドロップ／貼り付け／選択） ======
+  var drop=$("drop");
+  ["dragenter","dragover"].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.add("over"); }); });
+  ["dragleave","drop"].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.remove("over"); }); });
+  drop.addEventListener("drop",function(e){ if(e.dataTransfer&&e.dataTransfer.files.length) loadPdfFiles(e.dataTransfer.files); });
+  $("file").addEventListener("change",function(e){ if(e.target.files.length) loadPdfFiles(e.target.files); e.target.value=""; });
+  document.addEventListener("paste",function(e){
+    var files=[]; var cd=e.clipboardData; if(!cd) return;
+    for(var i=0;i<cd.items.length;i++){ var it=cd.items[i]; if(it.kind==="file"){ var f=it.getAsFile(); if(f) files.push(f); } }
+    if(files.length){ e.preventDefault(); loadPdfFiles(files); }
+  });
+
+  $("src").addEventListener("input",update);
+  $("fill").addEventListener("click",function(){ $("src").value=SAMPLE; setStatus("サンプル（テキスト）を入れました。"); update(); });
+  $("clear").addEventListener("click",function(){ $("src").value=""; setStatus("PDF未読込。テキストを下の欄に直接貼り付けてもOKです。"); update(); });
+  $("dl").addEventListener("click",download);
+  update();
+})();
+</script>
+</body>
+</html>

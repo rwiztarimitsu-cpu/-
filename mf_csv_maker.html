@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明細→MF取込CSVメーカー</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+<style>
+  :root{--ink:#1f2937;--sub:#6b7280;--line:#e5e7eb;--bg:#f7f8fa;--acc:#2563eb;--err:#dc2626;--warn:#b45309;--ok:#047857;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;font-size:14px;line-height:1.5}
+  .wrap{max-width:980px;margin:0 auto;padding:20px 16px 48px}
+  h1{font-size:20px;margin:0 0 4px}
+  .lead{color:var(--sub);margin:0 0 18px;font-size:13px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
+  input[type=text],input[type=number]{width:100%;padding:8px 10px;border:1px solid #cfd4dc;border-radius:6px;font-size:14px;background:#fff}
+  input:focus{outline:2px solid #bfdbfe;border-color:var(--acc)}
+  input.err{border-color:var(--err);background:#fff5f5}
+  .hint{font-size:12px;color:var(--sub);margin-top:4px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  th{font-size:12px;color:var(--sub);font-weight:600;background:#fafafa}
+  td input{padding:7px 8px}
+  .r{text-align:right}
+  .amt{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .btn{display:inline-block;padding:9px 16px;border-radius:7px;border:1px solid #cfd4dc;background:#fff;cursor:pointer;font-size:14px}
+  .btn.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  .btn.primary:disabled{opacity:.45;cursor:not-allowed}
+  .btn.small{padding:5px 10px;font-size:12px}
+  .btn.danger{color:var(--err)}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media(max-width:640px){.summary{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .stat .k{font-size:12px;color:var(--sub)}
+  .stat .v{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+  .stat.total{background:#eef4ff;border-color:#bfdbfe}
+  .msg{margin-top:10px;padding:10px 12px;border-radius:7px;font-size:13px;display:none}
+  .msg.err{display:block;background:#fef2f2;color:var(--err);border:1px solid #fecaca}
+  .msg.warn{display:block;background:#fffbeb;color:var(--warn);border:1px solid #fde68a}
+  .msg.ok{display:block;background:#ecfdf5;color:var(--ok);border:1px solid #a7f3d0}
+  textarea{width:100%;min-height:150px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:10px;border:1px solid #cfd4dc;border-radius:6px;background:#fafafa;white-space:pre;overflow:auto}
+  .foot{color:var(--sub);font-size:12px;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>明細→MF取込CSVメーカー</h1>
+  <p class="lead">品名・数量・単価を入れるだけで、マネーフォワード見積書の取込CSV（Shift-JIS・33列）を作ります。目標税込額を入れると、不課税の端数調整行を自動で追加します。処理はすべてこのブラウザ内で完結し、どこにも送信しません。</p>
+
+  <div class="card">
+    <h2>見積書の基本情報</h2>
+    <div class="grid">
+      <div><label>取引先名 <span style="color:var(--err)">*</span></label><input type="text" id="tori" placeholder="例：株式会社サンプル"></div>
+      <div><label>件名 <span style="color:var(--err)">*</span></label><input type="text" id="ken" placeholder="例：サンプル邸　除草工事"></div>
+      <div><label>目標税込額（円・任意）</label><input type="number" id="target" placeholder="例：260000" min="1" step="1"><div class="hint">入れると「端数調整（値引き）」行を不課税で自動追加します。空欄なら追加しません。</div></div>
+      <div><label>発行日（自動）</label><input type="text" id="hakko" readonly style="background:#f3f4f6;color:var(--sub)"><div class="hint">本日の日付を自動で入れます。</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>明細</h2>
+    <table>
+      <thead><tr><th style="width:36px">#</th><th>品名 <span style="color:var(--err)">*</span></th><th style="width:90px">数量 <span style="color:var(--err)">*</span></th><th style="width:80px">単位</th><th style="width:130px">単価（円） <span style="color:var(--err)">*</span></th><th class="r" style="width:120px">金額</th><th style="width:60px"></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="toolbar">
+      <button class="btn small" id="addRow" type="button">＋ 行を追加</button>
+      <span class="hint">税率はすべて10%です。不課税は端数調整行のみ自動で作られます。</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>集計プレビュー</h2>
+    <div class="summary">
+      <div class="stat"><div class="k">課税小計（10%対象）</div><div class="v" id="sSub">0</div></div>
+      <div class="stat"><div class="k">消費税（10%）</div><div class="v" id="sTax">0</div></div>
+      <div class="stat"><div class="k">端数調整（不課税）</div><div class="v" id="sAdj">0</div></div>
+      <div class="stat total"><div class="k">税込合計</div><div class="v" id="sTot">0</div></div>
+    </div>
+    <div class="hint" style="margin-top:8px">明細行数：<span id="sRows">0</span> 行</div>
+    <div class="msg" id="msg"></div>
+    <div class="toolbar">
+      <button class="btn primary" id="dl" type="button" disabled>CSVをダウンロード（Shift-JIS）</button>
+      <button class="btn small" id="fill" type="button">サンプルを入れる</button>
+      <button class="btn small danger" id="clear" type="button">クリア</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>CSVプレビュー（確認用・画面表示はUTF-8）</h2>
+    <textarea id="csvPrev" readonly></textarea>
+    <div class="foot">ダウンロードされるファイルはShift-JISに変換されます。ファイル名：MF取込用_見積.csv</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ---------- 定数 ----------
+  var HEADER = ["csv_type(変更不可)","行形式","取引先名称","件名","発行日","見積書番号","メモ","タグ","小計","消費税","合計金額","取引先敬称","取引先郵便番号","取引先都道府県","取引先住所1","取引先住所2","取引先部署","取引先担当者役職","取引先担当者氏名","自社担当者氏名","備考","受注ステータス","メール送信ステータス","郵送ステータス","ダウンロードステータス","品名","品目コード","単価","数量","単位","詳細","金額","品目消費税率"];
+  var COLS = HEADER.length; // 33
+  var CSV_TYPE = "30301";
+  var INIT_ROWS = 3;
+
+  var $ = function(id){ return document.getElementById(id); };
+  var rowsEl = $("rows");
+
+  // ---------- 日付 ----------
+  function today(){
+    var d = new Date();
+    var y = d.getFullYear(), m = ("0"+(d.getMonth()+1)).slice(-2), dd = ("0"+d.getDate()).slice(-2);
+    return y+"/"+m+"/"+dd;
+  }
+  $("hakko").value = today();
+
+  // ---------- 行 ----------
+  function addRow(v){
+    v = v || {};
+    var tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td class="idx"></td>'+
+      '<td><input type="text" class="name" placeholder="例：残材処分費"></td>'+
+      '<td><input type="number" class="qty" value="1" min="0" step="any"></td>'+
+      '<td><input type="text" class="unit" placeholder="式"></td>'+
+      '<td><input type="number" class="price" min="0" step="1" placeholder="0"></td>'+
+      '<td class="r amt lineAmt">0</td>'+
+      '<td><button class="btn small danger del" type="button">削除</button></td>';
+    tr.querySelector(".name").value = v.name || "";
+    if (v.qty !== undefined) tr.querySelector(".qty").value = v.qty;
+    tr.querySelector(".unit").value = v.unit || "";
+    if (v.price !== undefined) tr.querySelector(".price").value = v.price;
+    rowsEl.appendChild(tr);
+    tr.querySelector(".del").addEventListener("click", function(){ tr.remove(); renumber(); update(); });
+    tr.querySelectorAll("input").forEach(function(i){ i.addEventListener("input", update); });
+    renumber();
+  }
+  function renumber(){
+    Array.prototype.forEach.call(rowsEl.querySelectorAll("tr"), function(tr,i){ tr.querySelector(".idx").textContent = i+1; });
+  }
+
+  // ---------- 数値 ----------
+  function fmt(n){ return (n<0?"-":"")+Math.abs(n).toLocaleString("ja-JP"); }
+  function isIntStr(s){ return /^-?\d+$/.test(String(s).trim()); }
+
+  // ---------- 読み取り＆検証 ----------
+  function collect(){
+    var errors = [], warns = [];
+    var tori = $("tori").value.trim(), ken = $("ken").value.trim(), tStr = $("target").value.trim();
+    var markErr = function(el,on){ el.classList.toggle("err", !!on); };
+    markErr($("tori"), !tori); if(!tori) errors.push("取引先名を入力してください");
+    markErr($("ken"), !ken);   if(!ken)  errors.push("件名を入力してください");
+
+    var target = null;
+    if (tStr !== "") {
+      if (!isIntStr(tStr) || Number(tStr) <= 0) { errors.push("目標税込額は正の整数で入力してください"); markErr($("target"), true); }
+      else { target = Number(tStr); markErr($("target"), false); }
+    } else markErr($("target"), false);
+
+    var items = [];
+    Array.prototype.forEach.call(rowsEl.querySelectorAll("tr"), function(tr,i){
+      var n = i+1;
+      var nameEl=tr.querySelector(".name"), qtyEl=tr.querySelector(".qty"), unitEl=tr.querySelector(".unit"), priceEl=tr.querySelector(".price");
+      var name=nameEl.value.trim(), qtyS=qtyEl.value.trim(), unit=unitEl.value.trim()||"式", priceS=priceEl.value.trim();
+      var qtyDefault = (qtyS==="1"); // 既定値のまま
+      var blank = !name && !priceS && (qtyDefault || !qtyS);
+      [nameEl,qtyEl,priceEl].forEach(function(e){ e.classList.remove("err"); });
+      tr.querySelector(".lineAmt").textContent = "0";
+      if (blank) return; // 完全空行は無視
+
+      var ok = true;
+      if (!name) { errors.push("品名を入力してください（"+n+"行目）"); nameEl.classList.add("err"); ok=false; }
+      var qty = Number(qtyS);
+      if (qtyS==="" || isNaN(qty) || qty <= 0) { errors.push("数量は0より大きい数値で入力してください（"+n+"行目）"); qtyEl.classList.add("err"); ok=false; }
+      if (priceS==="" || !isIntStr(priceS) || Number(priceS) < 0) { errors.push("単価は0以上の整数で入力してください（"+n+"行目）※値引きは目標税込額で自動計算"); priceEl.classList.add("err"); ok=false; }
+      if (!ok) return;
+      var price = Number(priceS);
+      var amt = Math.round(qty*price);
+      tr.querySelector(".lineAmt").textContent = fmt(amt);
+      items.push({name:name, qty:qty, unit:unit, price:price, amt:amt});
+    });
+    if (items.length===0) errors.push("明細を1行以上入力してください");
+
+    var sub = items.reduce(function(a,b){ return a+b.amt; },0);
+    var tax = Math.round(sub*0.10);
+    var adj = 0;
+    if (target !== null) {
+      adj = target - (sub+tax);
+      if (adj > 0) warns.push("目標税込額が税込合計より大きく、端数調整がプラス（増額 +"+fmt(adj)+"円）になります。");
+    }
+    var total = sub+tax+adj;
+    return {errors:errors, warns:warns, tori:tori, ken:ken, hakko:$("hakko").value, target:target, items:items, sub:sub, tax:tax, adj:adj, total:total};
+  }
+
+  // ---------- CSV ----------
+  function esc(v){
+    v = (v===undefined||v===null) ? "" : String(v);
+    return /[",\r\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+  }
+  function row(){ var a=[]; for(var i=0;i<COLS;i++) a.push(""); return a; }
+  function buildCSV(d){
+    var lines = [HEADER.join(",")];
+    var h = row(); h[0]=CSV_TYPE; h[1]="見積書"; h[2]=d.tori; h[3]=d.ken; h[4]=d.hakko; h[11]="御中";
+    lines.push(h.map(esc).join(","));
+    var all = d.items.slice();
+    if (d.target !== null && d.adj !== 0) all.push({name:"端数調整（値引き）", qty:1, unit:"式", price:d.adj, amt:d.adj, fuka:true});
+    all.forEach(function(it){
+      var r = row(); r[0]=CSV_TYPE; r[1]="品目"; r[25]=it.name; r[27]=it.price; r[28]=it.qty; r[29]=it.unit; r[31]=it.amt; r[32]= it.fuka ? "不課税" : "10%";
+      lines.push(r.map(esc).join(","));
+    });
+    return lines.join("\r\n") + "\r\n";
+  }
+
+  // ---------- 更新 ----------
+  var lastCSV = "";
+  function update(){
+    var d = collect();
+    $("sSub").textContent = fmt(d.sub); $("sTax").textContent = fmt(d.tax); $("sAdj").textContent = fmt(d.adj); $("sTot").textContent = fmt(d.total);
+    $("sRows").textContent = d.items.length + (d.target!==null && d.adj!==0 ? "（＋端数調整1）" : "");
+    var msg = $("msg"); msg.className = "msg";
+    if (d.errors.length){ msg.classList.add("err"); msg.innerHTML = d.errors.map(function(e){return "・"+e;}).join("<br>"); $("dl").disabled = true; lastCSV=""; $("csvPrev").value=""; return; }
+    lastCSV = buildCSV(d);
+    $("csvPrev").value = lastCSV;
+    $("dl").disabled = false;
+    if (d.warns.length){ msg.classList.add("warn"); msg.innerHTML = d.warns.map(function(e){return "⚠ "+e;}).join("<br>"); }
+    else { msg.classList.add("ok"); msg.textContent = "入力OK。ダウンロードできます。"; }
+  }
+
+  // ---------- ダウンロード（Shift-JIS） ----------
+  function download(){
+    if (!lastCSV) return;
+    if (typeof Encoding === "undefined"){ alert("文字コード変換ライブラリ（encoding.js）が読み込めていません。ネット接続を確認してください。"); return; }
+    var codes = Encoding.stringToCode(lastCSV);
+    var sjis  = Encoding.convert(codes, {to:"SJIS", from:"UNICODE"});
+    var blob  = new Blob([new Uint8Array(sjis)], {type:"text/csv"});
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "MF取込用_見積.csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  // ---------- サンプル／クリア ----------
+  function fillSample(){
+    rowsEl.innerHTML = "";
+    $("tori").value = "株式会社サンプル";
+    $("ken").value  = "サンプル邸　除草工事";
+    $("target").value = "260000";
+    addRow({name:"除草工事 一式", qty:1, unit:"式", price:200000});
+    addRow({name:"残材処分費", qty:1, unit:"式", price:30000});
+    addRow({name:"諸経費", qty:1, unit:"式", price:10000});
+    update();
+  }
+  function clearAll(){
+    rowsEl.innerHTML=""; $("tori").value=""; $("ken").value=""; $("target").value="";
+    for(var i=0;i<INIT_ROWS;i++) addRow();
+    update();
+  }
+
+  // ---------- 初期化 ----------
+  $("addRow").addEventListener("click", function(){ addRow(); update(); });
+  $("dl").addEventListener("click", download);
+  $("fill").addEventListener("click", fillSample);
+  $("clear").addEventListener("click", clearAll);
+  ["tori","ken","target"].forEach(function(id){ $(id).addEventListener("input", update); });
+  for(var i=0;i<INIT_ROWS;i++) addRow();
+  update();
+})();
+</script>
+</body>
+</html>
