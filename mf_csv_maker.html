@@ -45,6 +45,11 @@
   .msg.ok{display:block;background:#ecfdf5;color:var(--ok);border:1px solid #a7f3d0}
   textarea{width:100%;min-height:150px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:10px;border:1px solid #cfd4dc;border-radius:6px;background:#fafafa;white-space:pre;overflow:auto}
   .foot{color:var(--sub);font-size:12px;margin-top:10px}
+  .btn.obs{background:#7c3aed;border-color:#7c3aed;color:#fff;font-weight:600}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .status{font-size:12px;margin-top:8px;color:var(--sub)}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)}
+  details{margin-top:10px} summary{cursor:pointer;font-size:12px;color:var(--sub);margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -89,6 +94,23 @@
       <button class="btn small" id="fill" type="button">サンプルを入れる</button>
       <button class="btn small danger" id="clear" type="button">クリア</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Obsidianに保存（見積ノート）</h2>
+    <div class="grid">
+      <div><label for="obsVault">Vault名（空欄＝Obsidianで最後に使ったVault）</label><input type="text" id="obsVault" placeholder="例：仕事"></div>
+      <div><label for="obsFolder">保存フォルダ（空欄＝Vault直下）</label><input type="text" id="obsFolder" placeholder="例：見積"></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn obs" id="obsSend" type="button" disabled>Obsidianにノートを作成</button>
+      <button class="btn small" id="obsCopy" type="button" disabled>Markdownをコピー</button>
+      <button class="btn small" id="obsDl" type="button" disabled>.mdをダウンロード</button>
+    </div>
+    <div class="status">保存先：<span id="obsPathDisp">—</span></div>
+    <div class="status" id="obsStatus"></div>
+    <details><summary>ノートのプレビュー（Markdown）</summary><textarea id="mdPrev" readonly></textarea></details>
+    <div class="hint">このPCのObsidianを obsidian:// リンクで開いてノートを作ります（ネット送信なし。本文はクリップボード経由で渡します）。取引先・件名・金額はプロパティに入るので、Basesで見積一覧にできます（READMEの「Obsidian連携」参照）。同名ノートは上書きしません。</div>
   </div>
 
   <div class="card">
@@ -221,9 +243,10 @@
     $("sSub").textContent = fmt(d.sub); $("sTax").textContent = fmt(d.tax); $("sAdj").textContent = fmt(d.adj); $("sTot").textContent = fmt(d.total);
     $("sRows").textContent = d.items.length + (d.target!==null && d.adj!==0 ? "（＋端数調整1）" : "");
     var msg = $("msg"); msg.className = "msg";
-    if (d.errors.length){ msg.classList.add("err"); msg.innerHTML = d.errors.map(function(e){return "・"+e;}).join("<br>"); $("dl").disabled = true; lastCSV=""; $("csvPrev").value=""; return; }
+    if (d.errors.length){ msg.classList.add("err"); msg.innerHTML = d.errors.map(function(e){return "・"+e;}).join("<br>"); $("dl").disabled = true; lastCSV=""; $("csvPrev").value=""; obsSet(null); return; }
     lastCSV = buildCSV(d);
     $("csvPrev").value = lastCSV;
+    obsSet(buildNote(d));
     $("dl").disabled = false;
     if (d.warns.length){ msg.classList.add("warn"); msg.innerHTML = d.warns.map(function(e){return "⚠ "+e;}).join("<br>"); }
     else { msg.classList.add("ok"); msg.textContent = "入力OK。ダウンロードできます。"; }
@@ -240,6 +263,84 @@
     a.href = URL.createObjectURL(blob); a.download = "MF取込用_見積.csv";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  // ====== Obsidian連携（index.html と共通の部品） ======
+  // obsidian://new でこのPCのObsidianにノートを作る（ネット送信なし）。金額などはプロパティ（frontmatter）に入れ、Bases／Dataviewで一覧化できるようにする。
+  var OBS_STORE  = "mfTools.obsidian"; // Vault名・フォルダをこのブラウザに記憶（2ツール共通）
+  var OBS_FOLDER = "見積";             // 既定の保存フォルダ
+  var OBS_TAG    = "見積";             // ノートに付けるタグ（見積一覧.base の絞り込みに使用）
+  function yq(v){ return '"'+String(v).replace(/\\/g,"\\\\").replace(/"/g,'\\"')+'"'; }
+  function mdCell(v){ return String(v).replace(/\|/g,"\\|"); }
+  function fileSafe(s){ return String(s).replace(/[\\\/:*?"<>|#^\[\]]/g," ").replace(/\s+/g," ").trim().replace(/^\.+/,""); }
+  function frontmatter(props){ // props: [[キー, 値], …]。数値・YYYY-MM-DDはそのまま、文字列は引用符付き。null/空は出さない
+    var out=["---"];
+    props.forEach(function(p){ var v=p[1]; if(v===null||v===undefined||v==="") return; out.push(p[0]+": "+(typeof v==="number"||/^\d{4}-\d{2}-\d{2}$/.test(v)? String(v) : yq(v))); });
+    out.push("tags:","  - "+OBS_TAG,"---");
+    return out.join("\n");
+  }
+  function noteTitle(date,ken){ return date+" "+(fileSafe(ken).slice(0,60)||"見積"); }
+  function obsPath(title){
+    var folder=$("obsFolder").value.split(/[\\\/]+/).map(fileSafe).filter(Boolean).join("/");
+    return (folder? folder+"/" : "")+title;
+  }
+  function obsStatus(t,cls){ var s=$("obsStatus"); s.textContent=t; s.className="status"+(cls?" "+cls:""); }
+  function obsRemember(){ try{ localStorage.setItem(OBS_STORE, JSON.stringify({vault:$("obsVault").value.trim(), folder:$("obsFolder").value.trim()})); }catch(e){} }
+  function obsRestore(){
+    var s={vault:"", folder:OBS_FOLDER};
+    try{ var o=JSON.parse(localStorage.getItem(OBS_STORE)||"null"); if(o){ if(typeof o.vault==="string") s.vault=o.vault; if(typeof o.folder==="string") s.folder=o.folder; } }catch(e){}
+    $("obsVault").value=s.vault; $("obsFolder").value=s.folder;
+  }
+  async function copyText(t){
+    try{ if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(t); return true; } }catch(e){}
+    try{ var ta=document.createElement("textarea"); ta.value=t; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.select(); var ok=document.execCommand("copy"); document.body.removeChild(ta); return ok; }catch(e){ return false; }
+  }
+  function clickLink(href,dlName){ var a=document.createElement("a"); a.href=href; if(dlName) a.download=dlName; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
+  var obsNote=null; // {title, md}
+  function obsShowPath(){ $("obsPathDisp").textContent= obsNote? obsPath(obsNote.title)+".md" : "—"; }
+  function obsSet(note){
+    obsNote=note;
+    ["obsSend","obsCopy","obsDl"].forEach(function(id){ $(id).disabled=!note; });
+    $("mdPrev").value= note? note.md : "";
+    obsShowPath(); obsStatus(""); // 内容が変わったら前回の送信結果の表示は消す
+  }
+  async function obsSend(){
+    if(!obsNote) return;
+    obsRemember();
+    var vault=$("obsVault").value.trim(), path=obsPath(obsNote.title), q=[];
+    if(vault) q.push("vault="+encodeURIComponent(vault));
+    q.push("file="+encodeURIComponent(path));
+    // 日本語はURLエンコードで長くなりOS側の長さ制限に当たりやすいので、本文はクリップボード経由で渡す（コピーできない環境だけURLに直接入れる）
+    var viaClip=await copyText(obsNote.md);
+    q.push(viaClip? "clipboard=true" : "content="+encodeURIComponent(obsNote.md));
+    clickLink("obsidian://new?"+q.join("&"));
+    obsStatus("Obsidianに送りました："+(vault||"最後に使ったVault")+" ／ "+path+".md　※Obsidianが開かない場合は「.mdをダウンロード」してVaultのフォルダに置いてください","ok");
+  }
+  async function obsCopy(){ if(!obsNote) return; var ok=await copyText(obsNote.md); obsStatus(ok? "Markdownをコピーしました。Obsidianの新規ノートに貼り付けてください。" : "コピーできませんでした。プレビュー欄から手でコピーしてください。", ok?"ok":"err"); }
+  function obsDownload(){
+    if(!obsNote) return;
+    var url=URL.createObjectURL(new Blob([obsNote.md],{type:"text/markdown;charset=utf-8"}));
+    clickLink(url, obsNote.title+".md"); setTimeout(function(){URL.revokeObjectURL(url);},1000);
+    obsStatus("ダウンロードしました："+obsNote.title+".md（Vaultの「"+($("obsFolder").value.trim()||"直下")+"」フォルダに置けば一覧に出ます）","ok");
+  }
+  obsRestore();
+  ["obsVault","obsFolder"].forEach(function(id){ $(id).addEventListener("input",function(){ obsRemember(); obsShowPath(); }); });
+  $("obsSend").addEventListener("click",obsSend);
+  $("obsCopy").addEventListener("click",obsCopy);
+  $("obsDl").addEventListener("click",obsDownload);
+
+  // 見積ノート（Markdown）：プロパティ＋明細表
+  function buildNote(d){
+    var date=d.hakko.replace(/\//g,"-"), adjOn=(d.target!==null && d.adj!==0);
+    var L=[frontmatter([["作成元","明細CSVメーカー"],["取引先",d.tori],["件名",d.ken],["発行日",date],
+                         ["小計",d.sub],["消費税",d.tax],["端数調整",adjOn? d.adj : null],["税込合計",d.total],["目標税込額",d.target]]),
+           "","# "+d.ken,"","| # | 品名 | 数量 | 単位 | 単価 | 金額 |","| --: | --- | --: | --- | --: | --: |"];
+    d.items.forEach(function(it,i){ L.push("| "+(i+1)+" | "+mdCell(it.name)+" | "+it.qty+" | "+mdCell(it.unit)+" | "+fmt(it.price)+" | "+fmt(it.amt)+" |"); });
+    if(adjOn) L.push("|  | 端数調整（値引き）※不課税 | 1 | 式 | "+fmt(d.adj)+" | "+fmt(d.adj)+" |");
+    L.push("","- 取引先："+d.tori+" 御中","- 課税小計（10%対象）："+fmt(d.sub)+" 円","- 消費税（10%）："+fmt(d.tax)+" 円");
+    if(adjOn) L.push("- 端数調整（不課税）："+fmt(d.adj)+" 円");
+    L.push("- **税込合計："+fmt(d.total)+" 円**","");
+    return {title:noteTitle(date,d.ken), md:L.join("\n")};
   }
 
   // ---------- サンプル／クリア ----------

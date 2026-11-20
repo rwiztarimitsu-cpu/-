@@ -1,0 +1,41 @@
+# 見積一覧（Obsidian Bases）
+# このファイルをVaultの好きな場所にコピーすると、MF見積ツールから保存した見積ノート（タグ「見積」）が表で一覧できます。
+# 列の並べ替え・絞り込みはObsidianの画面上で変更できます（変更はこのファイルに保存されます）。
+filters:
+  and:
+    - file.hasTag("見積")
+properties:
+  file.name:
+    displayName: ノート
+views:
+  - type: table
+    name: すべての見積
+    order:
+      - file.name
+      - note.発行日
+      - note.取引先
+      - note.件名
+      - note.作成元
+      - note.小計
+      - note.消費税
+      - note.税込合計
+      - note.粗利額
+      - note.粗利率
+    summaries:
+      note.小計: Sum
+      note.税込合計: Sum
+      note.粗利額: Sum
+  - type: table
+    name: 取引先別
+    groupBy:
+      property: note.取引先
+      direction: ASC
+    order:
+      - file.name
+      - note.発行日
+      - note.件名
+      - note.税込合計
+      - note.粗利額
+    summaries:
+      note.税込合計: Sum
+      note.粗利額: Sum
